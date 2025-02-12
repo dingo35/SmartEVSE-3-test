@@ -1,3 +1,4 @@
+#include <unordered_map>
 #ifdef SMARTEVSE_VERSION //ESP32
 
 #include <ArduinoJson.h>
@@ -14,6 +15,7 @@
 #include <HTTPClient.h>
 #include <ESPmDNS.h>
 #include <Update.h>
+#include <glcd.h>
 
 #include <Logging.h>
 #include <ModbusServerRTU.h>        // Slave/node
@@ -215,6 +217,8 @@ extern uint8_t AccessTimer;
 extern int8_t TempEVSE;
 extern uint8_t ButtonState;
 extern uint8_t OldButtonState;
+extern uint8_t ButtonStateOverride;
+extern uint32_t LastBtnOverrideTime;
 extern uint8_t ChargeDelay;
 extern uint8_t C1Timer;
 extern uint8_t ModemStage;
@@ -553,9 +557,9 @@ void getButtonState() {
     // As the buttons are shared with the SPI lines going to the LCD,
     // we have to make sure that this does not interfere by write actions to the LCD.
     // Therefore updating the LCD is also done in this task.
-/*    if (ButtonStateOverride != 7)
+    if (ButtonStateOverride != 7 && millis() - LastBtnOverrideTime < 4000)
         ButtonState = ButtonStateOverride;
-    else {*/
+    else {
 #if SMARTEVSE_VERSION >=30 && SMARTEVSE_VERSION < 40
         pinMatrixOutDetach(PIN_LCD_SDO_B3, false, false);       // disconnect MOSI pin
         pinMode(PIN_LCD_SDO_B3, INPUT);
@@ -575,7 +579,7 @@ void getButtonState() {
                       (digitalRead(BUTTON1)        ? 1 : 0);   // < (left)
 #endif
         pinMode(PIN_LCD_A0_B2, OUTPUT);                        // switch pin back to output
-//    }
+    }
 }
 
 
@@ -1880,6 +1884,53 @@ bool handle_URI(struct mg_connection *c, struct mg_http_message *hm,  webServerR
         serializeJson(doc, json);
         mg_http_reply(c, 200, "Content-Type: application/json\r\n", "%s\r\n", json.c_str());    // Yes. Respond JSON
         return true;
+
+    } else if (mg_http_match_uri(hm, "/lcd")) {
+        if (strncmp("POST", hm->method.buf, hm->method.len) == 0) {
+            const String btnName = request->getParam("button")->value();
+            const bool btnDown = request->getParam("state")->value() == "1";
+
+            // Button state bitmasks.
+            static const std::unordered_map<std::string, uint8_t> btnMasks = {
+                {"right", 0b100},
+                {"middle", 0b010},
+                {"left", 0b001}
+            };
+
+            auto it = btnMasks.find(btnName.c_str());
+            if (it != btnMasks.end()) {
+                // Clear bits if button is pressed, set bits if up.
+                const uint8_t mask = it->second;
+                if (btnDown) {
+                    ButtonStateOverride = 7 & ~mask;
+                } else {
+                    ButtonStateOverride = 7 | mask;
+                }
+                // Prevent stuck button in case we forget to reset to a 'down' button state. 
+                LastBtnOverrideTime = millis();
+            } 
+
+            // Create JSON response
+            DynamicJsonDocument doc(200);
+            doc["button"]["right"] = ButtonStateOverride & 4 ? "up" : "down";
+            doc["button"]["middle"] = ButtonStateOverride & 2 ? "up" : "down";
+            doc["button"]["left"] = ButtonStateOverride & 1 ? "up" : "down";
+
+            // Serialize and send response
+            String json;
+            serializeJson(doc, json);
+            mg_http_reply(c, 200, "Content-Type: application/json\r\n", "%s\r\n", json.c_str());
+        } else {
+            // Serve the LCD as BMP image.
+            const auto &bmpImage = createImageFromGLCDBuffer(); // Use const ref to avoid unnecessary copy
+            mg_printf(c, "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: image/bmp\r\n"
+                      "Content-Length: %d\r\n\r\n", static_cast<int>(bmpImage.size()));
+            mg_send(c, bmpImage.data(), bmpImage.size());
+            c->is_draining = 1;
+        }
+        return true;
+
 #if MODEM
     } else if (mg_http_match_uri(hm, "/ev_state") && !memcmp("POST", hm->method.buf, hm->method.len)) {
         DynamicJsonDocument doc(200);

@@ -334,7 +334,7 @@
                   <div class="row">
 
                     <!-- Earnings (Monthly) Card Example -->
-                    <div style="margin-bottom: 20px;">
+                    <div class="col-md-6" style="margin-bottom: 20px;">
                         <div class="card border-left-primary shadow h-100 py-2">
                             <div class="card-body">
                                 <div class="row no-gutters align-items-center">
@@ -470,6 +470,52 @@
                             </div>
                         </div>
                     </div>
+                      <div class="col-md-6" style="margin-bottom: 20px;">
+                          <div class="card border-left-primary shadow h-100 py-2">
+                              <div class="card-body">
+                                  <div class="row no-gutters align-items-center">
+                                      <div class="lcd" id="lcd">
+                                          <img class="lcd-device" src="SmartEVSE.webp" width="401" height="600" alt=""/>
+                                          <img class="lcd-screen" src="/lcd" width="256" height="128" alt=""/>
+                                          <div class="lcd-buttons">
+                                              <button type="button" data-name="left">Left</button>
+                                              <button type="button" data-name="middle">Middle</button>
+                                              <button type="button" data-name="right">Right</button>
+                                          </div>
+                                      </div>
+<script>
+    (() => {
+        const LCD_SCREEN = document.querySelector('#lcd .lcd-screen');
+        const LCD_BUTTONS = document.querySelector('#lcd .lcd-buttons');
+
+        // Refresh the LCD screen every second.
+        setInterval(refreshLCD, 1000);
+
+        function refreshLCD() {
+            LCD_SCREEN.src = `${LCD_SCREEN.src.split('?')[0]}?t=${Date.now()}`;
+        }
+
+        function sendButtonState(btnName, stateDown) {
+            if (btnName) {
+                $.post(`/lcd?button=${btnName}&state=${stateDown ? '1' : '0'}`,
+                    // Immediate LCD screen refresh in case of button down.     
+                    stateDown && refreshLCD);
+            }
+        }
+
+        ['mousedown', 'mouseup'].forEach(eventName => {
+            LCD_BUTTONS.addEventListener(eventName, event => {
+                const btnName = event.target.dataset.name;
+                const stateDown = event.type === 'mousedown';
+                sendButtonState(btnName, stateDown);
+            });
+        });
+    })();
+</script>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
 
 
 
